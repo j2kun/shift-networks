@@ -1,4 +1,4 @@
-from vos_vos_erkin import vos_vos_erkin, RotationGroup
+from vos_vos_erkin import vos_vos_erkin
 
 
 def test_fig3():
