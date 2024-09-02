@@ -33,7 +33,7 @@ def vos_vos_erkin(n: int, permutation: dict[int, int]) -> list[RotationGroup]:
 
     # Here we compute the coresponding table of values after each rotation,
     # akin to the table in Figure 3 of the paper, excluding the first column
-    # of values that are to be rotated by 1.
+    # of values that are about to be rotated by 1.
     rounds = []
     for i in range(n.bit_length() - 1):
         rotation_amount = 1 << i
