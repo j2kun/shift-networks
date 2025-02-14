@@ -40,7 +40,7 @@ def vos_vos_erkin(n: int, permutation: dict[int, int]) -> list[RotationGroup]:
         last_round = rounds[-1] if rounds else {x: x for x in range(n)}
         rounds.append(
             {
-                x: (last_round[x] + rotation_amount if bits[i] == 1 else x)
+                x: (last_round[x] + rotation_amount if bits[i] == 1 else last_round[x])
                 for (x, bits) in zip(range(n), shift_bits)
             }
         )
@@ -59,6 +59,4 @@ def vos_vos_erkin(n: int, permutation: dict[int, int]) -> list[RotationGroup]:
     for index, color in coloring.items():
         indices_by_color[color].append(index)
 
-    return [
-        RotationGroup(indices=frozenset(group)) for group in indices_by_color
-    ]
+    return [RotationGroup(indices=frozenset(group)) for group in indices_by_color]

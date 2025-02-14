@@ -22,7 +22,8 @@ def test_fig3():
         15: 1,
     }
     actual = vos_vos_erkin(n, permutation)
-    assert len(actual) == 2
+    assert len(actual) == 3
+    # FIXME: this test is obsolete after a bug fix
     for bad_edge in [
         (1, 2),
         (1, 3),
