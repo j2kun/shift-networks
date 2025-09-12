@@ -34,13 +34,15 @@ def is_power_of_two(n: int) -> bool:
 
 
 def vos_vos_erkin(
-    n: int, mapping: Iterable[tuple[int, int]], available_shifts=None
+    n: int, mapping: Iterable[tuple[int, int]], shift_order=None
 ) -> list[RotationGroup]:
     assert is_power_of_two(n)
-    if not available_shifts:
+    if not shift_order:
         # use the default order of LSB to MSB.
-        available_shifts = [1 << i for i in range(n.bit_length() - 1)]
-        print(f"{available_shifts=}")
+        shift_order = [1 << i for i in range(n.bit_length() - 1)]
+        print(f"{shift_order=}")
+
+    assert set(shift_order) == set(1 << i for i in range(n.bit_length() - 1))
 
     sources = {source for (source, _) in mapping}
 
@@ -51,9 +53,7 @@ def vos_vos_erkin(
             SourceShiftBits(
                 source=source,
                 shift=shift,
-                power_of_two_shifts_needed=set(
-                    x for x in available_shifts if shift & x
-                ),
+                power_of_two_shifts_needed=set(x for x in shift_order if shift & x),
             )
         )
         print(f"{source_shift_bits[-1]=}")
@@ -70,7 +70,7 @@ def vos_vos_erkin(
     )
     print()
     print(rounds[-1])
-    for rotation_amount in available_shifts:
+    for rotation_amount in shift_order:
         last_round = rounds[-1]
         current_round = {}
         for ssb in source_shift_bits:

@@ -3,7 +3,7 @@ from vos_vos_erkin import vos_vos_erkin
 
 def test_fig3():
     n = 16
-    permutation = {
+    mapping = {
         0: 13,
         1: 8,
         2: 4,
@@ -21,7 +21,7 @@ def test_fig3():
         14: 9,
         15: 1,
     }.items()
-    actual = vos_vos_erkin(n, permutation)
+    actual = vos_vos_erkin(n, mapping)
     assert len(actual) == 3
     for bad_edge in [
         (0, 14),
@@ -45,7 +45,7 @@ def test_fig3():
 
 def test_mapping():
     n = 16
-    permutation = [
+    mapping = [
         (0, 0),
         (0, 1),
         (0, 2),
@@ -63,13 +63,13 @@ def test_mapping():
         (0, 14),
         (0, 15),
     ]
-    actual = vos_vos_erkin(n, permutation)
+    actual = vos_vos_erkin(n, mapping)
     assert len(actual) == 1
 
 
 def test_mapping_2():
     n = 16
-    permutation = [
+    mapping = [
         (0, 0),
         (0, 1),
         (0, 2),
@@ -87,6 +87,32 @@ def test_mapping_2():
         (1, 14),
         (1, 15),
     ]
-    actual = vos_vos_erkin(n, permutation)
+    actual = vos_vos_erkin(n, mapping)
     # the default ordering of shifts creates the conflict
     assert len(actual) == 2
+
+
+def test_mapping_2_with_different_ordering():
+    n = 16
+    mapping = [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (0, 4),
+        (0, 5),
+        (0, 6),
+        (0, 7),
+        (1, 8),
+        (1, 9),
+        (1, 10),
+        (1, 11),
+        (1, 12),
+        (1, 13),
+        (1, 14),
+        (1, 15),
+    ]
+    actual = vos_vos_erkin(n, mapping, shift_order=[8, 4, 2, 1])
+    # Putting 8 first allows the initial value in slot 1 to be shifted
+    # away from the conflict first.
+    assert len(actual) == 1
