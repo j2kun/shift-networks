@@ -5,6 +5,7 @@ http://dx.doi.org/10.1007/978-3-031-17140-6_20
 import itertools
 from dataclasses import dataclass
 import networkx as nx
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -19,11 +20,10 @@ def is_power_of_two(n: int) -> bool:
     return n & (n - 1) == 0
 
 
-def vos_vos_erkin(n: int, permutation: dict[int, int]) -> list[RotationGroup]:
+def vos_vos_erkin(n: int, mapping: Iterable[tuple[int, int]]) -> list[RotationGroup]:
     assert is_power_of_two(n)
-    assert set(permutation.keys()) == set(range(n))
 
-    shifts = [(permutation[i] - i) % n for i in range(n)]
+    shifts = [(target - source) % n for (source, target) in mapping]
     format_string = f"{{:0{n.bit_length() - 1}b}}"
 
     # LSB-to-MSB ordering of bits of each shift
