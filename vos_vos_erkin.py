@@ -6,6 +6,7 @@ import itertools
 from dataclasses import dataclass
 import networkx as nx
 from typing import Iterable
+from computational_model import Ciphertext, is_power_of_two
 
 
 @dataclass(frozen=True)
@@ -28,18 +29,17 @@ class SourceShiftBits:
     power_of_two_shifts_needed: set[int]
 
 
-def is_power_of_two(n: int) -> bool:
-    """Check if n is a power of two."""
-    return n & (n - 1) == 0
+def default_shift_order(n: int):
+    # use the default order of 1, 2, 4, ..., log2(n)
+    return [1 << i for i in range(n.bit_length() - 1)]
 
 
 def vos_vos_erkin(
-    n: int, mapping: Iterable[tuple[int, int]], shift_order=None
+    n: int, mapping: Iterable[tuple[int, int]], shift_order: list[int] = None
 ) -> list[RotationGroup]:
     assert is_power_of_two(n)
     if not shift_order:
-        # use the default order of LSB to MSB.
-        shift_order = [1 << i for i in range(n.bit_length() - 1)]
+        shift_order = default_shift_order(n)
         print(f"{shift_order=}")
 
     assert set(shift_order) == set(1 << i for i in range(n.bit_length() - 1))
@@ -49,11 +49,12 @@ def vos_vos_erkin(
     source_shift_bits: list[SourceShiftBits] = []
     for source, target in mapping:
         shift = (target - source) % n
+        needed_shifts = set(x for x in shift_order if shift & x)
         source_shift_bits.append(
             SourceShiftBits(
                 source=source,
                 shift=shift,
-                power_of_two_shifts_needed=set(x for x in shift_order if shift & x),
+                power_of_two_shifts_needed=needed_shifts,
             )
         )
         print(f"{source_shift_bits[-1]=}")
@@ -68,8 +69,6 @@ def vos_vos_erkin(
             for ssb in source_shift_bits
         }
     )
-    print()
-    print(rounds[-1])
     for rotation_amount in shift_order:
         last_round = rounds[-1]
         current_round = {}
@@ -80,8 +79,6 @@ def vos_vos_erkin(
                 next_position = (last_round[key] + rotation_amount) % n
             current_round[key] = next_position
         rounds.append(current_round)
-        print(rounds[-1])
-    print()
 
     # Any two sources with colliding values in a round require an edge in G.
     G = nx.Graph()
@@ -105,3 +102,54 @@ def vos_vos_erkin(
         indices_by_color[color].append(index)
 
     return [RotationGroup(indices=frozenset(group)) for group in indices_by_color]
+
+
+def implement_shift_network(
+    n: int,
+    input: Ciphertext,
+    mapping: Iterable[tuple[int, int]],
+    rotation_groups: list[RotationGroup],
+    shift_order: list[int] = None,
+):
+    if not shift_order:
+        shift_order = default_shift_order(n)
+
+    # FIXME: undupe from above using NetworkStrategy and Rounds classes
+    source_shift_bits: list[SourceShiftBits] = []
+    for source, target in mapping:
+        shift = (target - source) % n
+        needed_shifts = set(x for x in shift_order if shift & x)
+        source_shift_bits.append(
+            SourceShiftBits(
+                source=source,
+                shift=shift,
+                power_of_two_shifts_needed=needed_shifts,
+            )
+        )
+
+    for accum, group in zip(group_results, rotation_groups):
+        rounds: list[dict[SourceShift, int]] = []
+        rounds.append(
+            {
+                SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
+                for ssb in source_shift_bits
+            }
+        )
+        for rotation_amount in shift_order:
+            last_round = rounds[-1]
+            current_round = {}
+            for ssb in source_shift_bits:
+                key = SourceShift(source=ssb.source, shift=ssb.shift)
+                next_position = last_round[key]
+                if rotation_amount in ssb.power_of_two_shifts_needed:
+                    next_position = (last_round[key] + rotation_amount) % n
+                current_round[key] = next_position
+            rounds.append(current_round)
+
+    # each rotation_group corresponds to one ciphertext
+    group_results = [Ciphertext([0] * len(input)) for _ in rotation_groups]
+
+    final_result = Ciphertext([0] * len(input))
+    for result in group_results:
+        final_result += result
+    return final_result

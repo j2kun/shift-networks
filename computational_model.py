@@ -20,7 +20,9 @@ class Ciphertext:
     def __mul__(self, other) -> "Ciphertext":
         if isinstance(other, Ciphertext):
             assert self.dim == other.dim
-            return Ciphertext([self.data[i] * other.data[i] for i in range(len(self.data))])
+            return Ciphertext(
+                [self.data[i] * other.data[i] for i in range(len(self.data))]
+            )
         elif isinstance(other, list):
             # Plaintext-ciphertext multiplication
             assert self.dim == len(other) and isinstance(other[0], int)
