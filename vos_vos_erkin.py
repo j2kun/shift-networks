@@ -25,7 +25,7 @@ class SourceShift:
 class SourceShiftBits:
     source: int
     shift: int
-    shift_bits: list[int]
+    power_of_two_shifts_needed: set[int]
 
 
 def is_power_of_two(n: int) -> bool:
@@ -33,23 +33,30 @@ def is_power_of_two(n: int) -> bool:
     return n & (n - 1) == 0
 
 
-def vos_vos_erkin(n: int, mapping: Iterable[tuple[int, int]]) -> list[RotationGroup]:
+def vos_vos_erkin(
+    n: int, mapping: Iterable[tuple[int, int]], available_shifts=None
+) -> list[RotationGroup]:
     assert is_power_of_two(n)
+    if not available_shifts:
+        # use the default order of LSB to MSB.
+        available_shifts = [1 << i for i in range(n.bit_length() - 1)]
+        print(f"{available_shifts=}")
 
     sources = {source for (source, _) in mapping}
-    format_string = f"{{:0{n.bit_length() - 1}b}}"
 
-    # LSB-to-MSB ordering of bits of each shift
     source_shift_bits: list[SourceShiftBits] = []
-    for (source, target) in mapping:
+    for source, target in mapping:
         shift = (target - source) % n
         source_shift_bits.append(
             SourceShiftBits(
                 source=source,
                 shift=shift,
-                shift_bits=[int(b) for b in reversed(format_string.format(shift))],
+                power_of_two_shifts_needed=set(
+                    x for x in available_shifts if shift & x
+                ),
             )
         )
+        print(f"{source_shift_bits[-1]=}")
 
     # Here we compute the coresponding table of values after each rotation,
     # akin to the table in Figure 3 of the paper, excluding the first column
@@ -63,14 +70,13 @@ def vos_vos_erkin(n: int, mapping: Iterable[tuple[int, int]]) -> list[RotationGr
     )
     print()
     print(rounds[-1])
-    for i in range(n.bit_length() - 1):
-        rotation_amount = 1 << i
+    for rotation_amount in available_shifts:
         last_round = rounds[-1]
         current_round = {}
         for ssb in source_shift_bits:
             key = SourceShift(source=ssb.source, shift=ssb.shift)
             next_position = last_round[key]
-            if ssb.shift_bits[i] == 1:
+            if rotation_amount in ssb.power_of_two_shifts_needed:
                 next_position = (last_round[key] + rotation_amount) % n
             current_round[key] = next_position
         rounds.append(current_round)
@@ -80,10 +86,11 @@ def vos_vos_erkin(n: int, mapping: Iterable[tuple[int, int]]) -> list[RotationGr
     # Any two sources with colliding values in a round require an edge in G.
     G = nx.Graph()
     for round_num, round in enumerate(rounds):
-        for (ss1, ss2) in itertools.combinations(round.keys(), 2):
+        for ss1, ss2 in itertools.combinations(round.keys(), 2):
             if ss1.source != ss2.source and round[ss1] == round[ss2]:
                 print(
-                    f"Round {round_num}: collision between {ss1} and {ss2} at {round[ss1]}"
+                    f"Round {round_num}: collision between "
+                    f"{ss1} and {ss2} at {round[ss1]}"
                 )
                 G.add_edge(ss1.source, ss2.source)
 

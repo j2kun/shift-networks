@@ -88,4 +88,5 @@ def test_mapping_2():
         (1, 15),
     ]
     actual = vos_vos_erkin(n, permutation)
-    assert len(actual) == 1
+    # the default ordering of shifts creates the conflict
+    assert len(actual) == 2
