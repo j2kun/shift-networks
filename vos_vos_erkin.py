@@ -15,6 +15,9 @@ class RotationGroup:
 
     indices: frozenset[int]
 
+    def __len__(self) -> int:
+        return len(self.indices)
+
 
 @dataclass(frozen=True)
 class SourceShift:
@@ -31,11 +34,10 @@ class SourceShiftBits:
 
 @dataclass(frozen=True)
 class ShiftRound:
-    # current positions of the input (source, shift) pairs in this round
+    # current positions of the input (source, shift) pairs in this round,
+    # AFTER the shift of the rotated_indices occurs
     positions: dict[SourceShift, int]
-    # The set of indices rotated left in this round
-    rotated_indices: set[int]
-    # The amount rotated left in this round
+    # The amount rotated right in this round; for the first round this is zero
     rotation_amount: int
 
 
@@ -83,14 +85,18 @@ class ShiftStrategy:
                     SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
                     for ssb in source_shift_bits
                 },
-                rotated_indices=set(),
                 rotation_amount=0,
             )
         )
+
+        round_num = 0
+        if self.debug:
+            print(f"Round {round_num}: {rounds[-1]}")
+
         for rotation_amount in self.shift_order:
+            round_num += 1
             last_round_posns = rounds[-1].positions
             current_round_posns = {}
-            current_round_rotated_indices = set()
 
             for ssb in source_shift_bits:
                 key = SourceShift(source=ssb.source, shift=ssb.shift)
@@ -98,15 +104,15 @@ class ShiftStrategy:
                 if rotation_amount in ssb.power_of_two_shifts_needed:
                     next_position = (last_round_posns[key] + rotation_amount) % self.n
                 current_round_posns[key] = next_position
-                current_round_rotated_indices.add(next_position)
 
             rounds.append(
                 ShiftRound(
                     positions=current_round_posns,
-                    rotated_indices=current_round_rotated_indices,
                     rotation_amount=rotation_amount,
                 )
             )
+            if self.debug:
+                print(f"Round {round_num}: {rounds[-1]}")
 
         return rounds
 
@@ -123,6 +129,9 @@ def vos_vos_erkin(
 
     # Any two sources with colliding values in a round require an edge in G.
     G = nx.Graph()
+    for source in sources:
+        G.add_node(source)
+
     for round_num, round in enumerate(rounds):
         if round_num == 0:
             continue  # skip the initial round which is the starting position
@@ -133,7 +142,7 @@ def vos_vos_erkin(
                 if debug:
                     print(
                         f"Round {round_num}: collision between "
-                        f"{ss1} and {ss2} at {round[ss1]}"
+                        f"{ss1} and {ss2} at {round.positions[ss1]}"
                     )
                 G.add_edge(ss1.source, ss2.source)
 
@@ -156,35 +165,71 @@ def implement_shift_network(
     mapping: Iterable[tuple[int, int]],
     rotation_groups: list[RotationGroup],
     shift_order: list[int] = None,
-):
+) -> Ciphertext:
     strategy = ShiftStrategy(n=n, shift_order=shift_order)
     rounds = strategy.evaluate(mapping)
 
     # each rotation_group corresponds to one independent set of rotations
-    group_results = [Ciphertext([0] * len(input)) for _ in rotation_groups]
+    group_results = [input for _ in rotation_groups]
 
     for group_num, group in enumerate(rotation_groups):
         if len(group) == 0:
             continue
 
+        source_shifts = [
+            SourceShift(source=source, shift=(target - source) % n)
+            for (source, target) in mapping
+            if source in group.indices
+        ]
         # Run the entire shift strategy for one rotation group
-        current = input
         for round_num, round in enumerate(rounds):
             if round_num == 0:
                 continue
 
-            if len(round.rotated_indices) == 0:
-                continue
+            # need two masks, one to select the indices in this group that need
+            # to be rotated, and one to preserve the values at fixed indices.
+            rotate_indices = []
+            fixed_indices = []
+            for key in source_shifts:
+                current_posn = rounds[round_num - 1].positions[key]
+                # we have to recompute this dynamically, because the indices
+                # rotated during the ShiftStrategy setup include conflicts from
+                # other rotation groups.
+                if key.shift & round.rotation_amount:
+                    rotate_indices.append(current_posn)
+                else:
+                    fixed_indices.append(current_posn)
 
-            mask = Ciphertext(
-                [
-                    1 if i in round.rotated_indices and i in group.indices else 0
-                    for i in range(n)
-                ]
-            )
-            current = current * mask
-            current = current.rotate(round.rotation_amount)
-            group_results[group_num] += current
+            rotate_mask = [0] * n
+            for i in rotate_indices:
+                rotate_mask[i] = 1
+
+            fixed_mask = [0] * n
+            for i in fixed_indices:
+                fixed_mask[i] = 1
+
+            current = group_results[group_num]
+
+            if all(x == 0 for x in fixed_mask):
+                fixed = None
+            elif all(x == 1 for x in fixed_mask):
+                fixed = current
+            else:
+                fixed = current * fixed_mask
+
+            if all(x == 0 for x in rotate_mask):
+                rotated = None
+            elif all(x == 1 for x in rotate_mask):
+                rotated = current.rotate(round.rotation_amount)
+            else:
+                rotated = (current * rotate_mask).rotate(round.rotation_amount)
+
+            if not fixed:
+                group_results[group_num] = rotated
+            elif not rotated:
+                group_results[group_num] = fixed
+            else:
+                group_results[group_num] = fixed + rotated
 
     # add all the results together
     final_result = Ciphertext([0] * len(input))

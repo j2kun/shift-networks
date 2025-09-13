@@ -1,4 +1,5 @@
-from vos_vos_erkin import vos_vos_erkin
+from computational_model import Ciphertext
+from vos_vos_erkin import vos_vos_erkin, implement_shift_network
 
 
 FIG3_MAPPING = {
@@ -60,6 +61,19 @@ TWO_REPLICATION_MAPPING = [
 ]
 
 
+def run_network_implementation(n, mapping, shift_order=None):
+    rot_groups = vos_vos_erkin(n, mapping, shift_order=shift_order)
+    input = Ciphertext(list(range(n)))
+    output = implement_shift_network(
+        n, input, mapping, rot_groups, shift_order=shift_order
+    )
+    expected = [0] * n
+    for source, target in mapping:
+        expected[target] = input.data[source]
+    expected = Ciphertext(expected)
+    assert output.data == expected.data
+
+
 def test_fig3():
     n = 16
     actual = vos_vos_erkin(n, FIG3_MAPPING)
@@ -82,12 +96,14 @@ def test_fig3():
             bad_edge[0] in group.indices and bad_edge[1] in group.indices
             for group in actual
         )
+    run_network_implementation(n, FIG3_MAPPING)
 
 
 def test_mapping():
     n = 16
     actual = vos_vos_erkin(n, FULL_REPLICATION_MAPPING)
     assert len(actual) == 1
+    run_network_implementation(n, FULL_REPLICATION_MAPPING)
 
 
 def test_mapping_2():
@@ -95,6 +111,7 @@ def test_mapping_2():
     actual = vos_vos_erkin(n, TWO_REPLICATION_MAPPING)
     # the default ordering of shifts creates the conflict
     assert len(actual) == 2
+    run_network_implementation(n, TWO_REPLICATION_MAPPING)
 
 
 def test_mapping_2_with_different_ordering():
@@ -103,3 +120,4 @@ def test_mapping_2_with_different_ordering():
     # Putting 8 first allows the initial value in slot 1 to be shifted
     # away from the conflict first.
     assert len(actual) == 1
+    run_network_implementation(n, TWO_REPLICATION_MAPPING, shift_order=[8, 4, 2, 1])
