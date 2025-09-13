@@ -5,7 +5,7 @@ http://dx.doi.org/10.1007/978-3-031-17140-6_20
 import itertools
 from dataclasses import dataclass
 import networkx as nx
-from typing import Iterable
+from typing import Iterable, Optional
 from computational_model import Ciphertext, is_power_of_two
 
 
@@ -29,66 +29,112 @@ class SourceShiftBits:
     power_of_two_shifts_needed: set[int]
 
 
+@dataclass(frozen=True)
+class ShiftRound:
+    # current positions of the input (source, shift) pairs in this round
+    positions: dict[SourceShift, int]
+    # The set of indices rotated left in this round
+    rotated_indices: set[int]
+    # The amount rotated left in this round
+    rotation_amount: int
+
+
 def default_shift_order(n: int):
     # use the default order of 1, 2, 4, ..., log2(n)
     return [1 << i for i in range(n.bit_length() - 1)]
 
 
-def vos_vos_erkin(
-    n: int, mapping: Iterable[tuple[int, int]], shift_order: list[int] = None
-) -> list[RotationGroup]:
-    assert is_power_of_two(n)
-    if not shift_order:
-        shift_order = default_shift_order(n)
-        print(f"{shift_order=}")
+class ShiftStrategy:
+    def __init__(
+        self, n: int, shift_order: Optional[list[int]] = None, debug: bool = False
+    ):
+        if not shift_order:
+            shift_order = default_shift_order(n)
 
-    assert set(shift_order) == set(1 << i for i in range(n.bit_length() - 1))
+        assert is_power_of_two(n)
+        assert set(shift_order) == set(1 << i for i in range(n.bit_length() - 1))
 
-    sources = {source for (source, _) in mapping}
+        self.n = n
+        self.shift_order = shift_order
+        self.debug = debug
 
-    source_shift_bits: list[SourceShiftBits] = []
-    for source, target in mapping:
-        shift = (target - source) % n
-        needed_shifts = set(x for x in shift_order if shift & x)
-        source_shift_bits.append(
-            SourceShiftBits(
-                source=source,
-                shift=shift,
-                power_of_two_shifts_needed=needed_shifts,
+    def evaluate(self, mapping: Iterable[tuple[int, int]]) -> list[ShiftRound]:
+        source_shift_bits: list[SourceShiftBits] = []
+        for source, target in mapping:
+            shift = (target - source) % self.n
+            needed_shifts = set(x for x in self.shift_order if shift & x)
+            source_shift_bits.append(
+                SourceShiftBits(
+                    source=source,
+                    shift=shift,
+                    power_of_two_shifts_needed=needed_shifts,
+                )
+            )
+            if self.debug:
+                print(f"{source_shift_bits[-1]=}")
+
+        # Here we compute the coresponding table of values after each rotation,
+        # akin to the table in Figure 3 of the paper, including the first column
+        # of values that are about to be rotated by 1.
+        rounds: list[dict[SourceShift, int]] = []
+        rounds.append(
+            ShiftRound(
+                positions={
+                    SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
+                    for ssb in source_shift_bits
+                },
+                rotated_indices=set(),
+                rotation_amount=0,
             )
         )
-        print(f"{source_shift_bits[-1]=}")
+        for rotation_amount in self.shift_order:
+            last_round_posns = rounds[-1].positions
+            current_round_posns = {}
+            current_round_rotated_indices = set()
 
-    # Here we compute the coresponding table of values after each rotation,
-    # akin to the table in Figure 3 of the paper, excluding the first column
-    # of values that are about to be rotated by 1.
-    rounds: list[dict[SourceShift, int]] = []
-    rounds.append(
-        {
-            SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
-            for ssb in source_shift_bits
-        }
-    )
-    for rotation_amount in shift_order:
-        last_round = rounds[-1]
-        current_round = {}
-        for ssb in source_shift_bits:
-            key = SourceShift(source=ssb.source, shift=ssb.shift)
-            next_position = last_round[key]
-            if rotation_amount in ssb.power_of_two_shifts_needed:
-                next_position = (last_round[key] + rotation_amount) % n
-            current_round[key] = next_position
-        rounds.append(current_round)
+            for ssb in source_shift_bits:
+                key = SourceShift(source=ssb.source, shift=ssb.shift)
+                next_position = last_round_posns[key]
+                if rotation_amount in ssb.power_of_two_shifts_needed:
+                    next_position = (last_round_posns[key] + rotation_amount) % self.n
+                current_round_posns[key] = next_position
+                current_round_rotated_indices.add(next_position)
+
+            rounds.append(
+                ShiftRound(
+                    positions=current_round_posns,
+                    rotated_indices=current_round_rotated_indices,
+                    rotation_amount=rotation_amount,
+                )
+            )
+
+        return rounds
+
+
+def vos_vos_erkin(
+    n: int,
+    mapping: Iterable[tuple[int, int]],
+    shift_order: Optional[list[int]] = None,
+    debug: bool = False,
+) -> list[RotationGroup]:
+    strategy = ShiftStrategy(n=n, shift_order=shift_order, debug=debug)
+    rounds = strategy.evaluate(mapping)
+    sources = {source for (source, _) in mapping}
 
     # Any two sources with colliding values in a round require an edge in G.
     G = nx.Graph()
     for round_num, round in enumerate(rounds):
-        for ss1, ss2 in itertools.combinations(round.keys(), 2):
-            if ss1.source != ss2.source and round[ss1] == round[ss2]:
-                print(
-                    f"Round {round_num}: collision between "
-                    f"{ss1} and {ss2} at {round[ss1]}"
-                )
+        if round_num == 0:
+            continue  # skip the initial round which is the starting position
+
+        posns = round.positions
+        for ss1, ss2 in itertools.combinations(posns.keys(), 2):
+            if ss1.source != ss2.source and posns[ss1] == posns[ss2]:
+                if debug:
+                    print(
+                        f"Round {round_num}: collision between "
+                        f"{ss1} and {ss2} at {round[ss1]}"
+                    )
                 G.add_edge(ss1.source, ss2.source)
 
     # Vertices are added as edges are added, so no vertices implies no edges,
@@ -111,44 +157,36 @@ def implement_shift_network(
     rotation_groups: list[RotationGroup],
     shift_order: list[int] = None,
 ):
-    if not shift_order:
-        shift_order = default_shift_order(n)
+    strategy = ShiftStrategy(n=n, shift_order=shift_order)
+    rounds = strategy.evaluate(mapping)
 
-    # FIXME: undupe from above using NetworkStrategy and Rounds classes
-    source_shift_bits: list[SourceShiftBits] = []
-    for source, target in mapping:
-        shift = (target - source) % n
-        needed_shifts = set(x for x in shift_order if shift & x)
-        source_shift_bits.append(
-            SourceShiftBits(
-                source=source,
-                shift=shift,
-                power_of_two_shifts_needed=needed_shifts,
-            )
-        )
-
-    for accum, group in zip(group_results, rotation_groups):
-        rounds: list[dict[SourceShift, int]] = []
-        rounds.append(
-            {
-                SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
-                for ssb in source_shift_bits
-            }
-        )
-        for rotation_amount in shift_order:
-            last_round = rounds[-1]
-            current_round = {}
-            for ssb in source_shift_bits:
-                key = SourceShift(source=ssb.source, shift=ssb.shift)
-                next_position = last_round[key]
-                if rotation_amount in ssb.power_of_two_shifts_needed:
-                    next_position = (last_round[key] + rotation_amount) % n
-                current_round[key] = next_position
-            rounds.append(current_round)
-
-    # each rotation_group corresponds to one ciphertext
+    # each rotation_group corresponds to one independent set of rotations
     group_results = [Ciphertext([0] * len(input)) for _ in rotation_groups]
 
+    for group_num, group in enumerate(rotation_groups):
+        if len(group) == 0:
+            continue
+
+        # Run the entire shift strategy for one rotation group
+        current = input
+        for round_num, round in enumerate(rounds):
+            if round_num == 0:
+                continue
+
+            if len(round.rotated_indices) == 0:
+                continue
+
+            mask = Ciphertext(
+                [
+                    1 if i in round.rotated_indices and i in group.indices else 0
+                    for i in range(n)
+                ]
+            )
+            current = current * mask
+            current = current.rotate(round.rotation_amount)
+            group_results[group_num] += current
+
+    # add all the results together
     final_result = Ciphertext([0] * len(input))
     for result in group_results:
         final_result += result
