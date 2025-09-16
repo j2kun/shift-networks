@@ -2,122 +2,179 @@ from computational_model import Ciphertext
 from vos_vos_erkin import vos_vos_erkin, implement_shift_network
 
 
-FIG3_MAPPING = {
-    0: 13,
-    1: 8,
-    2: 4,
-    3: 0,
-    4: 11,
-    5: 7,
-    6: 14,
-    7: 5,
-    8: 15,
-    9: 3,
-    10: 12,
-    11: 6,
-    12: 10,
-    13: 2,
-    14: 9,
-    15: 1,
-}.items()
+FIG3_MAPPING = [
+    ((0, 0), (0, 13)),
+    ((0, 1), (0, 8)),
+    ((0, 2), (0, 4)),
+    ((0, 3), (0, 0)),
+    ((0, 4), (0, 11)),
+    ((0, 5), (0, 7)),
+    ((0, 6), (0, 14)),
+    ((0, 7), (0, 5)),
+    ((0, 8), (0, 15)),
+    ((0, 9), (0, 3)),
+    ((0, 10), (0, 12)),
+    ((0, 11), (0, 6)),
+    ((0, 12), (0, 10)),
+    ((0, 13), (0, 2)),
+    ((0, 14), (0, 9)),
+    ((0, 15), (0, 1)),
+]
 
-
+# replicate a single slot to all slots in a single ciphertext
 FULL_REPLICATION_MAPPING = [
-    (0, 0),
-    (0, 1),
-    (0, 2),
-    (0, 3),
-    (0, 4),
-    (0, 5),
-    (0, 6),
-    (0, 7),
-    (0, 8),
-    (0, 9),
-    (0, 10),
-    (0, 11),
-    (0, 12),
-    (0, 13),
-    (0, 14),
-    (0, 15),
+    ((0, 0), (0, 0)),
+    ((0, 0), (0, 1)),
+    ((0, 0), (0, 2)),
+    ((0, 0), (0, 3)),
+    ((0, 0), (0, 4)),
+    ((0, 0), (0, 5)),
+    ((0, 0), (0, 6)),
+    ((0, 0), (0, 7)),
+    ((0, 0), (0, 8)),
+    ((0, 0), (0, 9)),
+    ((0, 0), (0, 10)),
+    ((0, 0), (0, 11)),
+    ((0, 0), (0, 12)),
+    ((0, 0), (0, 13)),
+    ((0, 0), (0, 14)),
+    ((0, 0), (0, 15)),
 ]
 
+# replicate the first slot to the first half of one ciphertext,
+# the second slot to the second half
 TWO_REPLICATION_MAPPING = [
-    (0, 0),
-    (0, 1),
-    (0, 2),
-    (0, 3),
-    (0, 4),
-    (0, 5),
-    (0, 6),
-    (0, 7),
-    (1, 8),
-    (1, 9),
-    (1, 10),
-    (1, 11),
-    (1, 12),
-    (1, 13),
-    (1, 14),
-    (1, 15),
+    ((0, 0), (0, 0)),
+    ((0, 0), (0, 1)),
+    ((0, 0), (0, 2)),
+    ((0, 0), (0, 3)),
+    ((0, 0), (0, 4)),
+    ((0, 0), (0, 5)),
+    ((0, 0), (0, 6)),
+    ((0, 0), (0, 7)),
+    ((0, 1), (0, 8)),
+    ((0, 1), (0, 9)),
+    ((0, 1), (0, 10)),
+    ((0, 1), (0, 11)),
+    ((0, 1), (0, 12)),
+    ((0, 1), (0, 13)),
+    ((0, 1), (0, 14)),
+    ((0, 1), (0, 15)),
 ]
 
 
-def run_network_implementation(n, mapping, shift_order=None):
-    rot_groups = vos_vos_erkin(n, mapping, shift_order=shift_order)
-    input = Ciphertext(list(range(n)))
-    output = implement_shift_network(
-        n, input, mapping, rot_groups, shift_order=shift_order
+# Swap two ciphertexts (shouldn't require any rotations)
+SWAP_TWO_CIPHERTEXTS = [
+    # ct 0 -> ct 1
+    ((0, 0), (1, 0)),
+    ((0, 1), (1, 1)),
+    ((0, 2), (1, 2)),
+    ((0, 3), (1, 3)),
+    # ct 1 -> ct 0
+    ((1, 0), (0, 0)),
+    ((1, 1), (0, 1)),
+    ((1, 2), (0, 2)),
+    ((1, 3), (0, 3)),
+]
+
+
+def run_network_implementation(
+    num_ciphertexts, ciphertext_size, mapping, shift_order=None
+):
+    rot_groups = vos_vos_erkin(
+        num_ciphertexts, ciphertext_size, mapping, shift_order=shift_order
     )
-    expected = [0] * n
+    # example is integers from 1...num_ciphertexts*ciphertext_size
+    # in row-major order
+    input = []
+    for i in range(num_ciphertexts):
+        input.append(Ciphertext([j + i * ciphertext_size for j in range(ciphertext_size)]))
+
+    output = implement_shift_network(
+        input, mapping, rot_groups, shift_order=shift_order
+    )
+
+    expected = []
+    for _ in range(num_ciphertexts):
+        expected.append(Ciphertext([0] * ciphertext_size))
     for source, target in mapping:
-        expected[target] = input.data[source]
-    expected = Ciphertext(expected)
-    assert output.data == expected.data
+        source_ct, source_slot = source
+        target_ct, target_slot = target
+        expected[target_ct].data[target_slot] = input[source_ct].data[source_slot]
+
+    assert output == expected
 
 
 def test_fig3():
-    n = 16
-    actual = vos_vos_erkin(n, FIG3_MAPPING)
+    ciphertext_size = 16
+    num_ciphertexts = 1
+    actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, FIG3_MAPPING)
     assert len(actual) == 3
     for bad_edge in [
-        (0, 14),
-        (0, 15),
-        (1, 2),
-        (1, 3),
-        (2, 3),
-        (4, 5),
-        (4, 9),
-        (8, 9),
-        (11, 12),
-        (11, 13),
-        (12, 13),
-        (14, 15),
+        ((0, 0), (0, 14)),
+        ((0, 0), (0, 15)),
+        ((0, 1), (0, 2)),
+        ((0, 1), (0, 3)),
+        ((0, 2), (0, 3)),
+        ((0, 4), (0, 5)),
+        ((0, 4), (0, 9)),
+        ((0, 8), (0, 9)),
+        ((0, 11), (0, 12)),
+        ((0, 11), (0, 13)),
+        ((0, 12), (0, 13)),
+        ((0, 14), (0, 15)),
     ]:
         assert not any(
-            bad_edge[0] in group.indices and bad_edge[1] in group.indices
+            bad_edge[0] in group.sources and bad_edge[1] in group.sources
             for group in actual
         )
-    run_network_implementation(n, FIG3_MAPPING)
+    run_network_implementation(num_ciphertexts, ciphertext_size, FIG3_MAPPING)
 
 
 def test_mapping():
-    n = 16
-    actual = vos_vos_erkin(n, FULL_REPLICATION_MAPPING)
+    ciphertext_size = 16
+    num_ciphertexts = 1
+    actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, FULL_REPLICATION_MAPPING)
     assert len(actual) == 1
-    run_network_implementation(n, FULL_REPLICATION_MAPPING)
+    run_network_implementation(
+        num_ciphertexts, ciphertext_size, FULL_REPLICATION_MAPPING
+    )
 
 
 def test_mapping_2():
-    n = 16
-    actual = vos_vos_erkin(n, TWO_REPLICATION_MAPPING)
+    ciphertext_size = 16
+    num_ciphertexts = 1
+    actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, TWO_REPLICATION_MAPPING)
     # the default ordering of shifts creates the conflict
     assert len(actual) == 2
-    run_network_implementation(n, TWO_REPLICATION_MAPPING)
+    run_network_implementation(
+        num_ciphertexts, ciphertext_size, TWO_REPLICATION_MAPPING
+    )
 
 
 def test_mapping_2_with_different_ordering():
-    n = 16
-    actual = vos_vos_erkin(n, TWO_REPLICATION_MAPPING, shift_order=[8, 4, 2, 1])
+    ciphertext_size = 16
+    num_ciphertexts = 1
+    actual = vos_vos_erkin(
+        num_ciphertexts,
+        ciphertext_size,
+        TWO_REPLICATION_MAPPING,
+        shift_order=[8, 4, 2, 1],
+    )
     # Putting 8 first allows the initial value in slot 1 to be shifted
     # away from the conflict first.
     assert len(actual) == 1
-    run_network_implementation(n, TWO_REPLICATION_MAPPING, shift_order=[8, 4, 2, 1])
+    run_network_implementation(
+        num_ciphertexts,
+        ciphertext_size,
+        TWO_REPLICATION_MAPPING,
+        shift_order=[8, 4, 2, 1],
+    )
+
+
+def test_swapping_two_ciphertexts():
+    ciphertext_size = 4
+    num_ciphertexts = 2
+    actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, SWAP_TWO_CIPHERTEXTS)
+    assert len(actual) == 1
+    run_network_implementation(num_ciphertexts, ciphertext_size, SWAP_TWO_CIPHERTEXTS)
