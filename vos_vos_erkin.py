@@ -46,8 +46,15 @@ class ShiftRound:
 
 
 def default_shift_order(n: int):
-    # use the default order of 1, 2, 4, ..., log2(n)
-    return [1 << i for i in range(n.bit_length() - 1)]
+    maxLog2 = n.bit_length()
+    # If the (possibly virtual) ciphertext size is exactly a power of two, then
+    # the formula below includes a shift by n, which is a no-op for a cyclic
+    # rotation.
+    if (is_power_of_two(n)):
+        maxLog2 -= 1
+
+    # use the default order of 1, 2, 4, ..., ceil(log2(n))
+    return [1 << i for i in range(maxLog2)]
 
 
 class ShiftStrategy:
@@ -70,10 +77,8 @@ class ShiftStrategy:
         if not shift_order:
             shift_order = default_shift_order(self.n)
 
-        assert is_power_of_two(ciphertext_size)
-        assert set(shift_order) == set(
-            1 << i for i in range(ciphertext_size.bit_length() - 1)
-        )
+        assert is_power_of_two(self.ciphertext_size)
+        assert set(shift_order) == set(default_shift_order(self.n))
 
         self.shift_order = shift_order
         self.debug = debug
@@ -199,6 +204,165 @@ def vos_vos_erkin(
     return [RotationGroup(sources=frozenset(group)) for group in sources_by_color]
 
 
+def apply_virtual_rotation(
+    input: list[Ciphertext], rotation: int, rotate_masks: list[list[int]]
+) -> list[Ciphertext]:
+    """Apply a virtual rotation to a real list of ciphertexts.
+
+    A virtual ciphertext is a flattening of a list of ciphertexts. When this
+    materializes to a set of rotations of the real ciphertexts, we need to
+    track the movement of slots between ciphertexts, and decompose the virtual
+    rotation into a set of real rotations and extra masks.
+
+    For example, we have to deal with ciphertexts which are rotated in such a
+    way that they overlap two subsequent ciphertexts in the larger "virtual"
+    ciphertext. E.g. if we have size 8 and two slots 3, 7 are rotated left by
+    2:
+
+     ct0: . . . x . . . y
+     ct1: . . . . . . . .
+
+    then after their rotation if the desired target for slot 7 is ct1 slot 2,
+    we have the following reality
+
+     ct0: . y . . . x . .
+     ct1: . . . . . . . .
+
+    and we need to mask the position of y to add it to ct1, while masking out x
+    to keep it with ct0.
+    """
+    num_ciphertexts = len(input)
+    ciphertext_size = len(input[0])
+
+    # We need to identify the (possibly two) target ciphertexts for each
+    # input ciphertext that was rotated. If there is only one target---i.e., if
+    # the rotation was exactly the power of two matching the
+    # ciphertext_size---we can update the target with the rotated ciphertexts
+    # and be done. If there are two targets, we need to add additional masks at
+    # the split
+    if rotation % ciphertext_size == 0:
+        masked = [input_ct * mask for input_ct, mask in zip(input, rotate_masks)]
+        # we don't need to apply the rotation at all, just reorder
+        ciphertext_shift = rotation // ciphertext_size
+        return masked[-ciphertext_shift:] + masked[:-ciphertext_shift]
+
+    min_slot = 0
+    max_slot = ciphertext_size - 1
+    last_slot_before_wrap = max(
+        x for x in range(ciphertext_size) if x + rotation < ciphertext_size
+    )
+
+    # Nb., there is a choice here:
+    #
+    #  1. Mask first, then rotate together, then mask twice to separate the
+    #     two targets.
+    #  2. Split mask first, mask twice, then rotate twice.
+    #
+    # Option (1) requires one rotation, but three ct-pt muls (depth 2), and
+    # option (2) requires two rotations, but only two ct-pt muls (depth 1). Not
+    # sure which is better. This func implements (2).
+    results = [Ciphertext([0] * ciphertext_size) for _ in range(num_ciphertexts)]
+    for i in range(num_ciphertexts):
+        mask = rotate_masks[i]
+        # Determine the two ciphertext targets for each input ciphertext.
+        # This is a worst-case target, i.e., the target if all slots are part of
+        # the mask. We will correct this later.
+        target1 = i + (min_slot + rotation) // ciphertext_size
+        target2 = i + (max_slot + rotation) // ciphertext_size
+
+        # Split each of the input masks into two masks, one for the pre-split
+        # and one for the post-split.
+        boundary_slot = last_slot_before_wrap
+        mask1 = mask[: boundary_slot + 1] + [0] * (ciphertext_size - boundary_slot - 1)
+        mask2 = [0] * (boundary_slot + 1) + mask[boundary_slot + 1 :]
+
+        # Apply the split masks to the input and rotate
+        if all(x == 0 for x in mask1):
+            rotated1 = None
+        else:
+            masked1 = input[i] * mask1
+            rotated1 = masked1.rotate(rotation % ciphertext_size)
+
+        if all(x == 0 for x in mask2):
+            rotated2 = None
+        else:
+            masked2 = input[i] * mask2
+            rotated2 = masked2.rotate(rotation % ciphertext_size)
+
+        # Add the rotated masks to their respective targets.
+        if rotated1:
+            results[target1 % num_ciphertexts] += rotated1
+        if rotated2:
+            results[target2 % num_ciphertexts] += rotated2
+
+    return results
+
+
+def implement_one_group(
+    group_init: list[Ciphertext],
+    source_shifts: list[SourceShift],
+    rounds: list[ShiftRound],
+    group: RotationGroup,
+) -> list[Ciphertext]:
+    num_ciphertexts = len(group_init)
+    ciphertext_size = len(group_init[0])
+    current = group_init
+
+    # Run the entire shift strategy for one rotation group
+    for round_num, round in enumerate(rounds):
+        if round_num == 0:
+            continue
+
+        # need two masks, one to select the sources in this group that need
+        # to be rotated, and one to preserve the values at fixed positions.
+        rotate_positions = []
+        fixed_positions = []
+        for key in source_shifts:
+            current_posn = rounds[round_num - 1].positions[key]
+            # we have to recompute this dynamically, because the sources
+            # rotated during the ShiftStrategy setup include conflicts from
+            # other rotation groups.
+            if key.shift & round.rotation_amount:
+                rotate_positions.append(current_posn)
+            else:
+                fixed_positions.append(current_posn)
+
+        fixed_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
+        for ct, slot in fixed_positions:
+            fixed_masks[ct][slot] = 1
+
+        # skip masking if possible
+        fixed_current = []
+        for ct, fixed_mask in zip(current, fixed_masks):
+            if all(x == 0 for x in fixed_mask):
+                fixed = None
+            elif all(x == 1 for x in fixed_mask):
+                fixed = ct
+            else:
+                fixed = ct * fixed_mask
+            fixed_current.append(fixed)
+
+        # import ipdb; ipdb.set_trace()
+        rotated_current = [None] * num_ciphertexts
+        if rotate_positions:
+            rotate_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
+            for ct, slot in rotate_positions:
+                rotate_masks[ct][slot] = 1
+            rotated_current = apply_virtual_rotation(
+                current, round.rotation_amount, rotate_masks
+            )
+
+        for i, (fixed, rotated) in enumerate(zip(fixed_current, rotated_current)):
+            if not fixed:
+                current[i] = rotated
+            elif not rotated:
+                current[i] = fixed
+            else:
+                current[i] = fixed + rotated
+
+    return current
+
+
 def implement_shift_network(
     input: list[Ciphertext],
     mapping: Iterable[tuple[int, int]],
@@ -227,86 +391,16 @@ def implement_shift_network(
             for (source, target) in mapping
             if source in group.sources
         ]
-        # Run the entire shift strategy for one rotation group
-        for round_num, round in enumerate(rounds):
-            if round_num == 0:
-                continue
-
-            # need two masks, one to select the sources in this group that need
-            # to be rotated, and one to preserve the values at fixed sources.
-            rotate_sources = []
-            fixed_sources = []
-            for key in source_shifts:
-                current_posn = rounds[round_num - 1].positions[key]
-                # we have to recompute this dynamically, because the sources
-                # rotated during the ShiftStrategy setup include conflicts from
-                # other rotation groups.
-                if key.shift & round.rotation_amount:
-                    rotate_sources.append(current_posn)
-                else:
-                    fixed_sources.append(current_posn)
-
-            rotate_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
-            for (ct, slot) in rotate_sources:
-                rotate_masks[ct][slot] = 1
-
-            fixed_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
-            for (ct, slot) in fixed_sources:
-                fixed_masks[ct][slot] = 1
-
-            current = group_results[group_num]
-
-            # skip masking if possible
-            fixed_current = []
-            for fixed_mask in fixed_masks:
-                if all(x == 0 for x in fixed_mask):
-                    fixed = None
-                elif all(x == 1 for x in fixed_mask):
-                    fixed = current
-                else:
-                    fixed = current * fixed_mask
-                fixed_current.append(fixed)
-
-            # skip masking if possible
-            rotated_current = []
-            for rotate_mask in rotate_masks:
-                if all(x == 0 for x in rotate_mask):
-                    rotated = None
-                elif all(x == 1 for x in rotate_mask):
-                    rotated = current.rotate(round.rotation_amount)
-                else:
-                    rotated = (current * rotate_mask).rotate(round.rotation_amount)
-                rotated_current.append(rotated)
-
-            # now we have to deal with ciphertexts which are rotated
-            # in such a way that they overlap two subsequent ciphertexts
-            # in the larger "virtual" ciphertext. E.g. if we have size 8
-            # and two slots 3, 7 are rotated left by 2:
-            #
-            #  ct0: . . . x . . . y
-            #  ct1: . . . . . . . .
-            #
-            # then after their rotation if the desired target for slot 7
-            # is ct1 slot 2, we have the following reality
-            #
-            #  ct0: . y . . . x . .
-            #  ct1: . . . . . . . .
-            #
-            # and we need to mask the position of y to add it to ct1,
-            # while masking out x to keep it with ct0.
-
-            # FIXME: implement this part
-
-            # old code:
-            # if not fixed:
-            #     group_results[group_num] = rotated
-            # elif not rotated:
-            #     group_results[group_num] = fixed
-            # else:
-            #     group_results[group_num] = fixed + rotated
+        group_results[group_num] = implement_one_group(
+            group_results[group_num],
+            source_shifts,
+            rounds,
+            group,
+        )
 
     # add all the results together
-    final_result = Ciphertext([0] * len(input))
+    final_result = [Ciphertext([0] * len(x)) for x in input]
     for result in group_results:
-        final_result += result
+        for i, ct in enumerate(result):
+            final_result[i] += ct
     return final_result

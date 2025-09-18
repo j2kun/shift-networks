@@ -77,6 +77,25 @@ SWAP_TWO_CIPHERTEXTS = [
     ((1, 3), (0, 3)),
 ]
 
+REORDER_THREE_CIPHERTEXTS = [
+    # ct 0 -> ct 2
+    ((0, 0), (2, 0)),
+    ((0, 1), (2, 1)),
+    ((0, 2), (2, 2)),
+    ((0, 3), (2, 3)),
+    # ct 1 -> ct 0
+    ((1, 0), (0, 0)),
+    ((1, 1), (0, 1)),
+    ((1, 2), (0, 2)),
+    ((1, 3), (0, 3)),
+    # ct 2 -> ct 1
+    ((2, 0), (1, 0)),
+    ((2, 1), (1, 1)),
+    ((2, 2), (1, 2)),
+    ((2, 3), (1, 3)),
+]
+
+
 
 def run_network_implementation(
     num_ciphertexts, ciphertext_size, mapping, shift_order=None
@@ -89,6 +108,8 @@ def run_network_implementation(
     input = []
     for i in range(num_ciphertexts):
         input.append(Ciphertext([j + i * ciphertext_size for j in range(ciphertext_size)]))
+
+    print(f"{input=}")
 
     output = implement_shift_network(
         input, mapping, rot_groups, shift_order=shift_order
@@ -173,8 +194,20 @@ def test_mapping_2_with_different_ordering():
 
 
 def test_swapping_two_ciphertexts():
+    # this tests the case where a virtual rotation is a multiple of the
+    # ciphertext size, and so the ciphertexts are simply reordered.
     ciphertext_size = 4
     num_ciphertexts = 2
     actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, SWAP_TWO_CIPHERTEXTS)
     assert len(actual) == 1
     run_network_implementation(num_ciphertexts, ciphertext_size, SWAP_TWO_CIPHERTEXTS)
+
+
+def test_reorder_three_ciphertexts():
+    # this tests the case where a virtual rotation is a multiple of the
+    # ciphertext size, and so the ciphertexts are simply reordered.
+    ciphertext_size = 4
+    num_ciphertexts = 3
+    actual = vos_vos_erkin(num_ciphertexts, ciphertext_size, REORDER_THREE_CIPHERTEXTS)
+    assert len(actual) == 1
+    run_network_implementation(num_ciphertexts, ciphertext_size, REORDER_THREE_CIPHERTEXTS)
