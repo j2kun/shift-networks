@@ -6,11 +6,11 @@ import itertools
 from dataclasses import dataclass
 import networkx as nx
 from typing import Iterable, Optional
-from computational_model import Ciphertext, is_power_of_two
+from computational_model import Ciphertext, Slot, is_power_of_two
 
 
-Slot = tuple[int, int]
 MappingEntry = tuple[Slot, Slot]
+Mapping = list[MappingEntry]
 
 
 @dataclass(frozen=True)
@@ -402,5 +402,6 @@ def implement_shift_network(
     final_result = [Ciphertext([0] * len(x)) for x in input]
     for result in group_results:
         for i, ct in enumerate(result):
-            final_result[i] += ct
+            if ct:
+                final_result[i] += ct
     return final_result

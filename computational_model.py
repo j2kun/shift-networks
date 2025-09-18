@@ -1,6 +1,9 @@
 """The arithmetic/SIMD model of FHE."""
 
 
+Slot = tuple[int, int]
+
+
 class Ciphertext:
     def __init__(self, data: list[int], original_shape: tuple[int, int] = None):
         self.data = data[:]
