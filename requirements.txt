@@ -1,5 +1,6 @@
 absl-py>=2.1.0
 exceptiongroup>=1.2.2
+hypothesis>=6.139.2
 iniconfig>=2.0.0
 networkx>=3.3
 numpy>=1.26.4
