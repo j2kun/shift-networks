@@ -50,7 +50,7 @@ def default_shift_order(n: int):
     # If the (possibly virtual) ciphertext size is exactly a power of two, then
     # the formula below includes a shift by n, which is a no-op for a cyclic
     # rotation.
-    if (is_power_of_two(n)):
+    if is_power_of_two(n):
         maxLog2 -= 1
 
     # use the default order of 1, 2, 4, ..., ceil(log2(n))
@@ -130,17 +130,15 @@ class ShiftStrategy:
 
             for ssb in source_shift_bits:
                 key = SourceShift(source=ssb.source, shift=ssb.shift)
-                next_position: Slot = last_round_posns[key]
+                curr_ct, curr_slot = last_round_posns[key]
+                curr_virtual_slot = curr_ct * self.ciphertext_size + curr_slot
+
+                next_position = (curr_ct, curr_slot)
                 if rotation_amount in ssb.power_of_two_shifts_needed:
-                    next_position_ct = next_position[0] + (
-                        rotation_amount // self.ciphertext_size
-                    )
-                    next_position_slot = next_position[1] + (
-                        rotation_amount % self.ciphertext_size
-                    )
+                    curr_virtual_slot = (curr_virtual_slot + rotation_amount) % self.n
                     next_position = (
-                        next_position_ct % self.num_ciphertexts,
-                        next_position_slot % self.ciphertext_size,
+                        curr_virtual_slot // self.ciphertext_size,
+                        curr_virtual_slot % self.ciphertext_size,
                     )
                 current_round_posns[key] = next_position
 
@@ -307,10 +305,12 @@ def implement_one_group(
     num_ciphertexts = len(group_init)
     ciphertext_size = len(group_init[0])
     current = group_init
+    print(f"{source_shifts=}")
 
     # Run the entire shift strategy for one rotation group
     for round_num, round in enumerate(rounds):
         if round_num == 0:
+            print(f"At round {round_num}: {current=}")
             continue
 
         # need two masks, one to select the sources in this group that need
@@ -342,7 +342,6 @@ def implement_one_group(
                 fixed = ct * fixed_mask
             fixed_current.append(fixed)
 
-        # import ipdb; ipdb.set_trace()
         rotated_current = [None] * num_ciphertexts
         if rotate_positions:
             rotate_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
@@ -353,12 +352,16 @@ def implement_one_group(
             )
 
         for i, (fixed, rotated) in enumerate(zip(fixed_current, rotated_current)):
+            if not fixed and not rotated:
+                continue  # current[i] is unchanged
+
             if not fixed:
                 current[i] = rotated
             elif not rotated:
                 current[i] = fixed
             else:
                 current[i] = fixed + rotated
+        print(f"After round {round_num}: {current=}")
 
     return current
 

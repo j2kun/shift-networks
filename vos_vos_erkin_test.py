@@ -2,12 +2,19 @@ from typing import Optional
 from dataclasses import dataclass
 
 import pytest
+from hypothesis import given, settings, example
+from hypothesis.strategies import composite, integers, permutations
 
 from computational_model import Ciphertext
-from vos_vos_erkin import vos_vos_erkin, implement_shift_network, Mapping
+from vos_vos_erkin import (
+    vos_vos_erkin,
+    implement_shift_network,
+    Mapping,
+    default_shift_order,
+)
 
 
-@dataclass(frozen = True)
+@dataclass(frozen=True)
 class TestCase:
     __test__ = False
     # The number of slots of each ciphertext
@@ -216,14 +223,17 @@ def test_network_implementation(test_case):
         num_ciphertexts, ciphertext_size, mapping, shift_order=test_case.shift_order
     )
 
-    assert len(rot_groups) == test_case.expected_num_groups
+    # allow zero for property tests that don't know the expected group count in
+    # advance
+    if test_case.expected_num_groups > 0:
+        assert len(rot_groups) == test_case.expected_num_groups
 
     # example is integers from 1...num_ciphertexts*ciphertext_size
     # in row-major order
     input = []
     for i in range(num_ciphertexts):
         input.append(
-            Ciphertext([j + i * ciphertext_size for j in range(ciphertext_size)])
+            Ciphertext([1 + j + i * ciphertext_size for j in range(ciphertext_size)])
         )
 
     print(f"{input=}")
@@ -241,3 +251,35 @@ def test_network_implementation(test_case):
         expected[target_ct].data[target_slot] = input[source_ct].data[source_slot]
 
     assert output == expected
+
+
+@composite
+def random_testcase(draw, min_ciphertexts=1, max_ciphertexts=32, ciphertext_size=8):
+    """Generate a random set of matchups."""
+    num_ciphertexts = draw(
+        integers(min_value=min_ciphertexts, max_value=max_ciphertexts)
+    )
+    shifts = default_shift_order(ciphertext_size * num_ciphertexts)
+    shift_order = draw(permutations(shifts))
+
+    # for each target slot, provide a random source slot
+    mapping = []
+    for ct in range(num_ciphertexts):
+        for slot in range(ciphertext_size):
+            source_ct = draw(integers(min_value=0, max_value=num_ciphertexts - 1))
+            source_slot = draw(integers(min_value=0, max_value=ciphertext_size - 1))
+            mapping.append(((source_ct, source_slot), (ct, slot)))
+
+    return TestCase(
+        ciphertext_size=ciphertext_size,
+        expected_num_groups=0,  # unknown
+        mapping=mapping,
+        num_ciphertexts=num_ciphertexts,
+        shift_order=shift_order,
+    )
+
+
+@settings(deadline=100000, max_examples=75)
+@given(random_testcase())
+def test_random_multiciphertext_mapping(test_case):
+    test_network_implementation(test_case)
