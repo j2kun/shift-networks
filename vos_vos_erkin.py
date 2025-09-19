@@ -72,6 +72,7 @@ class ShiftStrategy:
 
         assert is_power_of_two(self.ciphertext_size)
         assert set(shift_order) == set(default_shift_order(self.n))
+        assert len(set(shift_order)) == len(shift_order), "shift_order contains duplicates"
 
         self.shift_order = shift_order
         self.debug = debug
@@ -294,19 +295,22 @@ def implement_one_group(
         if round_num == 0:
             continue
 
-        # need two masks, one to select the sources in this group that need
+        # Need two masks, one to select the sources in this group that need
         # to be rotated, and one to preserve the values at fixed positions.
-        rotate_positions = []
-        fixed_positions = []
+        rotate_positions = set()
+        fixed_positions = set()
         for key in source_shifts:
             current_posn = rounds[round_num - 1].positions[key]
-            # we have to recompute this dynamically, because the sources
+            # We have to recompute this dynamically, because the sources
             # rotated during the ShiftStrategy setup include conflicts from
             # other rotation groups.
+            #
+            # There may be duplicates as well, since with replication a source
+            # may be in its correct spot and also need to be shifted.
             if key.shift & round.rotation_amount:
-                rotate_positions.append(current_posn)
+                rotate_positions.add(current_posn)
             else:
-                fixed_positions.append(current_posn)
+                fixed_positions.add(current_posn)
 
         fixed_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
         for ct, slot in fixed_positions:
@@ -323,6 +327,7 @@ def implement_one_group(
                 fixed = ct * fixed_mask
             fixed_current.append(fixed)
 
+        # import ipdb; ipdb.set_trace()
         rotated_current = [None] * num_ciphertexts
         if rotate_positions:
             rotate_masks = [[0] * ciphertext_size for _ in range(num_ciphertexts)]
@@ -332,16 +337,26 @@ def implement_one_group(
                 current, round.rotation_amount, rotate_masks
             )
 
+        touched = set()
+
         for i, (fixed, rotated) in enumerate(zip(fixed_current, rotated_current)):
             if not fixed and not rotated:
                 continue  # current[i] is unchanged
 
+            touched.add(i)
             if not fixed:
                 current[i] = rotated
             elif not rotated:
                 current[i] = fixed
             else:
                 current[i] = fixed + rotated
+
+    # Any result ciphertext which was never touched should be zeroed out or
+    # else it contains a copy of the input cipheretext which will be added to
+    # the final result incorrectly.
+    for i in range(num_ciphertexts):
+        if i not in touched:
+            current[i] = Ciphertext([0] * ciphertext_size)
 
     return current
 

@@ -279,6 +279,35 @@ def random_testcase(draw, min_ciphertexts=1, max_ciphertexts=32, ciphertext_size
     )
 
 
+
+# One of the resulting rotation groups consists of a single source is one
+# ciphertext that remains fixed the whole time. In this case the other
+# ciphertext must be treated as zero.
+TWO_CT_ONE_UNTOUCHED = TestCase(
+    ciphertext_size=8,
+    expected_num_groups=0,
+    mapping=[
+        ((0, 0), (0, 0)),
+        ((0, 0), (0, 1)),
+        ((0, 0), (0, 2)),
+        ((0, 0), (0, 3)),
+        ((0, 0), (0, 4)),
+        ((0, 0), (0, 5)),
+        ((0, 0), (0, 6)),
+        ((0, 0), (0, 7)),
+        ((0, 0), (1, 0)),
+        ((0, 0), (1, 1)),
+        ((1, 2), (1, 2)),
+        ((0, 0), (1, 3)),
+        ((0, 0), (1, 4)),
+        ((0, 0), (1, 5)),
+        ((0, 7), (1, 6)),
+        ((0, 0), (1, 7)),
+    ],
+    num_ciphertexts=2,
+    shift_order=[1, 2, 4, 8],
+)
+
 HARD_EXAMPLE_1 = TestCase(
     ciphertext_size=8,
     expected_num_groups=0,
@@ -491,6 +520,7 @@ HARD_EXAMPLE_1 = TestCase(
 
 @settings(deadline=100000, max_examples=75)
 @given(random_testcase())
+@example(TWO_CT_ONE_UNTOUCHED)
 @example(HARD_EXAMPLE_1)
 def test_random_multiciphertext_mapping(test_case):
     print(test_case.mapping)
