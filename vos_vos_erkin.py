@@ -30,13 +30,6 @@ class SourceShift:
 
 
 @dataclass(frozen=True)
-class SourceShiftBits:
-    source: Slot
-    shift: int
-    power_of_two_shifts_needed: set[int]
-
-
-@dataclass(frozen=True)
 class ShiftRound:
     # current positions of the input (source, shift) pairs in this round,
     # AFTER the shift by rotation_amount occurs
@@ -91,19 +84,13 @@ class ShiftStrategy:
         return (virtual_target - virtual_source) % self.n
 
     def evaluate(self, mapping: Iterable[MappingEntry]) -> list[ShiftRound]:
-        source_shift_bits: list[SourceShiftBits] = []
-        for source, target in mapping:
-            shift = self.virtual_shift(source, target)
-            needed_shifts = set(x for x in self.shift_order if shift & x)
-            source_shift_bits.append(
-                SourceShiftBits(
-                    source=source,
-                    shift=shift,
-                    power_of_two_shifts_needed=needed_shifts,
-                )
+        source_shifts = [
+            SourceShift(
+                source=source,
+                shift=self.virtual_shift(source, target),
             )
-            if self.debug:
-                print(f"{source_shift_bits[-1]=}")
+            for source, target in mapping
+        ]
 
         # Here we compute the coresponding table of values after each rotation,
         # akin to the table in Figure 3 of the paper, including the first column
@@ -111,10 +98,7 @@ class ShiftStrategy:
         rounds: list[dict[SourceShift, Slot]] = []
         rounds.append(
             ShiftRound(
-                positions={
-                    SourceShift(source=ssb.source, shift=ssb.shift): ssb.source
-                    for ssb in source_shift_bits
-                },
+                positions={ss: ss.source for ss in source_shifts},
                 rotation_amount=0,
             )
         )
@@ -128,13 +112,12 @@ class ShiftStrategy:
             last_round_posns = rounds[-1].positions
             current_round_posns = {}
 
-            for ssb in source_shift_bits:
-                key = SourceShift(source=ssb.source, shift=ssb.shift)
+            for key in source_shifts:
                 curr_ct, curr_slot = last_round_posns[key]
                 curr_virtual_slot = curr_ct * self.ciphertext_size + curr_slot
 
                 next_position = (curr_ct, curr_slot)
-                if rotation_amount in ssb.power_of_two_shifts_needed:
+                if rotation_amount & key.shift:
                     curr_virtual_slot = (curr_virtual_slot + rotation_amount) % self.n
                     next_position = (
                         curr_virtual_slot // self.ciphertext_size,
