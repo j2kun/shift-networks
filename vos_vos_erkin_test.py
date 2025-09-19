@@ -2,7 +2,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 import pytest
-from hypothesis import given, settings, example
+from hypothesis import given, settings
 from hypothesis.strategies import composite, integers, permutations
 
 from computational_model import Ciphertext
@@ -236,7 +236,7 @@ def test_network_implementation(test_case):
             Ciphertext([1 + j + i * ciphertext_size for j in range(ciphertext_size)])
         )
 
-    print(f"{input=}")
+    # print(f"{input=}")
 
     output = implement_shift_network(
         input, mapping, rot_groups, shift_order=shift_order
@@ -282,4 +282,5 @@ def random_testcase(draw, min_ciphertexts=1, max_ciphertexts=32, ciphertext_size
 @settings(deadline=100000, max_examples=75)
 @given(random_testcase())
 def test_random_multiciphertext_mapping(test_case):
+    print(test_case.mapping)
     test_network_implementation(test_case)

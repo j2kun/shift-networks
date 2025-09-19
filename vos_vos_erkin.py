@@ -305,12 +305,10 @@ def implement_one_group(
     num_ciphertexts = len(group_init)
     ciphertext_size = len(group_init[0])
     current = group_init
-    print(f"{source_shifts=}")
 
     # Run the entire shift strategy for one rotation group
     for round_num, round in enumerate(rounds):
         if round_num == 0:
-            print(f"At round {round_num}: {current=}")
             continue
 
         # need two masks, one to select the sources in this group that need
@@ -361,7 +359,6 @@ def implement_one_group(
                 current[i] = fixed
             else:
                 current[i] = fixed + rotated
-        print(f"After round {round_num}: {current=}")
 
     return current
 
