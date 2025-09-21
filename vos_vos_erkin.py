@@ -198,7 +198,7 @@ def apply_virtual_rotation(
 
     For example, we have to deal with ciphertexts which are rotated in such a
     way that they overlap two subsequent ciphertexts in the larger "virtual"
-    ciphertext. E.g. if we have size 8 and two slots 3, 7 are rotated left by
+    ciphertext. E.g. if we have size 8 and two slots 3, 7 are rotated right by
     2:
 
      ct0: . . . x . . . y
@@ -230,9 +230,7 @@ def apply_virtual_rotation(
 
     min_slot = 0
     max_slot = ciphertext_size - 1
-    last_slot_before_wrap = max(
-        x for x in range(ciphertext_size) if x + rotation < ciphertext_size
-    )
+    last_slot_before_wrap = ciphertext_size - 1 - rotation
 
     # Nb., there is a choice here:
     #

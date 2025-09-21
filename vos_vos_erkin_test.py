@@ -201,18 +201,58 @@ SINGLE_ROT_SPLIT = TestCase(
 )
 
 
-@pytest.mark.parametrize(
-    "test_case",
-    [
-        FIG3,
-        FULL_REPLICATION,
-        TWO_REPLICATION,
-        TWO_REPLICATION_ALTERNATE_SHIFT_ORDER,
-        SWAP_TWO_CIPHERTEXTS,
-        REORDER_THREE_CIPHERTEXTS,
-        SINGLE_ROT_SPLIT,
-    ],
-)
+cpp_test_template = """TEST(ImplementShiftNetworkTest, Test{name}) {{
+  int64_t numCts = {num_ciphertexts};
+  int64_t ctSize = {ciphertext_size};
+  Mapping mapping;
+{add_slots}
+  VosVosErkinShiftNetworks shiftNetworks(ctSize, numCts);
+  EXPECT_EQ(shiftNetworks.findShiftScheme(mapping).rotationGroups.size(), {expected_num_groups});
+}}
+
+"""
+
+add_slot_template = "  mapping.add(CtSlot({source_ct}, {source_slot}), CtSlot({target_ct}, {target_slot}));"
+
+
+def generate_cpp_test_case(name: str, test_case: TestCase) -> str:
+    add_slots = []
+    for source, target in test_case.mapping:
+        source_ct, source_slot = source
+        target_ct, target_slot = target
+        add_slots.append(
+            add_slot_template.format(
+                source_ct=source_ct,
+                source_slot=source_slot,
+                target_ct=target_ct,
+                target_slot=target_slot,
+            )
+        )
+    return cpp_test_template.format(
+        name=name,
+        num_ciphertexts=test_case.num_ciphertexts,
+        ciphertext_size=test_case.ciphertext_size,
+        add_slots="\n".join(add_slots),
+        expected_num_groups=test_case.expected_num_groups,
+    )
+
+
+TEST_CASES = {
+    "Fig3": FIG3,
+    "FullReplication": FULL_REPLICATION,
+    "TwoReplication": TWO_REPLICATION,
+    "TwoReplicationAlternateShiftOrder": TWO_REPLICATION_ALTERNATE_SHIFT_ORDER,
+    "SwapTwoCiphertexts": SWAP_TWO_CIPHERTEXTS,
+    "ReorderThreeCiphertexts": REORDER_THREE_CIPHERTEXTS,
+    "SingleRotSplit": SINGLE_ROT_SPLIT,
+}
+
+
+for name, test_case in TEST_CASES.items():
+    print(generate_cpp_test_case(name, test_case))
+
+
+@pytest.mark.parametrize("test_case", TEST_CASES.values())
 def test_network_implementation(test_case):
     num_ciphertexts = test_case.num_ciphertexts
     ciphertext_size = test_case.ciphertext_size
@@ -277,7 +317,6 @@ def random_testcase(draw, min_ciphertexts=1, max_ciphertexts=32, ciphertext_size
         num_ciphertexts=num_ciphertexts,
         shift_order=shift_order,
     )
-
 
 
 # One of the resulting rotation groups consists of a single source is one
