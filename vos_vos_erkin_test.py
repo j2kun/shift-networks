@@ -206,16 +206,29 @@ cpp_test_template = """TEST(ImplementShiftNetworkTest, Test{name}) {{
   int64_t ctSize = {ciphertext_size};
   Mapping mapping;
 {add_slots}
-  VosVosErkinShiftNetworks shiftNetworks(ctSize, numCts);
-  EXPECT_EQ(shiftNetworks.findShiftScheme(mapping).rotationGroups.size(), {expected_num_groups});
+  VosVosErkinShiftNetworks shiftNetworks;
+  auto scheme = shiftNetworks.findShiftScheme(mapping);
+  EXPECT_EQ(scheme.rotationGroups.size(), {expected_num_groups});
+  simulateShiftNetwork(mapping, scheme, numCts, ctSize);
 }}
+"""
 
+
+randomized_cpp_test_template = """TEST(ImplementShiftNetworkTest, Test{name}) {{
+  int64_t numCts = {num_ciphertexts};
+  int64_t ctSize = {ciphertext_size};
+  Mapping mapping(ctSize, numCts);
+{add_slots}
+  VosVosErkinShiftNetworks shiftNetworks;
+  auto scheme = shiftNetworks.findShiftScheme(mapping);
+  simulateShiftNetwork(mapping, scheme, numCts, ctSize);
+}}
 """
 
 add_slot_template = "  mapping.add(CtSlot({source_ct}, {source_slot}), CtSlot({target_ct}, {target_slot}));"
 
 
-def generate_cpp_test_case(name: str, test_case: TestCase) -> str:
+def generate_cpp_test_case(name: str, test_case: TestCase, random:bool = False) -> str:
     add_slots = []
     for source, target in test_case.mapping:
         source_ct, source_slot = source
@@ -228,6 +241,14 @@ def generate_cpp_test_case(name: str, test_case: TestCase) -> str:
                 target_slot=target_slot,
             )
         )
+    if random:
+        return randomized_cpp_test_template.format(
+            name=name,
+            num_ciphertexts=test_case.num_ciphertexts,
+            ciphertext_size=test_case.ciphertext_size,
+            add_slots="\n".join(add_slots),
+        )
+
     return cpp_test_template.format(
         name=name,
         num_ciphertexts=test_case.num_ciphertexts,
@@ -248,8 +269,8 @@ TEST_CASES = {
 }
 
 
-for name, test_case in TEST_CASES.items():
-    print(generate_cpp_test_case(name, test_case))
+# for name, test_case in TEST_CASES.items():
+#     print(generate_cpp_test_case(name, test_case))
 
 
 @pytest.mark.parametrize("test_case", TEST_CASES.values())
@@ -557,10 +578,14 @@ HARD_EXAMPLE_1 = TestCase(
 )
 
 
+random_index = 0
+
 @settings(deadline=100000, max_examples=75)
 @given(random_testcase())
 @example(TWO_CT_ONE_UNTOUCHED)
 @example(HARD_EXAMPLE_1)
 def test_random_multiciphertext_mapping(test_case):
-    print(test_case.mapping)
+    global random_index
+    print(generate_cpp_test_case(f"RANDOM_{random_index}", test_case, random=True))
+    random_index += 1
     test_network_implementation(test_case)
