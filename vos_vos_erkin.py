@@ -279,6 +279,7 @@ def apply_virtual_rotation(
 
 
 def implement_one_group(
+    mapping: Mapping,
     group_init: list[Ciphertext],
     source_shifts: list[SourceShift],
     rounds: list[ShiftRound],
@@ -335,13 +336,10 @@ def implement_one_group(
                 current, round.rotation_amount, rotate_masks
             )
 
-        touched = set()
-
         for i, (fixed, rotated) in enumerate(zip(fixed_current, rotated_current)):
             if not fixed and not rotated:
                 continue  # current[i] is unchanged
 
-            touched.add(i)
             if not fixed:
                 current[i] = rotated
             elif not rotated:
@@ -349,11 +347,16 @@ def implement_one_group(
             else:
                 current[i] = fixed + rotated
 
+    final_target_cts = set()
+    for (source, target) in mapping:
+        if source in group.sources:
+            final_target_cts.add(target[0])
+
     # Any result ciphertext which was never touched should be zeroed out or
     # else it contains a copy of the input cipheretext which will be added to
     # the final result incorrectly.
     for i in range(num_ciphertexts):
-        if i not in touched:
+        if i not in final_target_cts:
             current[i] = Ciphertext([0] * ciphertext_size)
 
     return current
@@ -388,6 +391,7 @@ def implement_shift_network(
             if source in group.sources
         ]
         group_results[group_num] = implement_one_group(
+            mapping,
             group_results[group_num],
             source_shifts,
             rounds,
